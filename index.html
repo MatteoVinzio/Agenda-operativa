@@ -538,7 +538,13 @@ button.stat:active{transform:scale(.985);}
 .m-head{display:flex;align-items:center;gap:12px;justify-content:space-between;padding:17px 20px;border-bottom:1px solid var(--ink-100);flex:none;}
 .m-head h2{font-size:17px;font-weight:800;letter-spacing:-.03em;}
 .m-head p{font-size:12.5px;color:var(--ink-500);margin-top:2px;}
-.m-body{padding:18px 20px;overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch;}
+/* I tre moduli di inserimento avvolgono corpo e piede in un <form>. Un form
+   è un blocco normale: senza questa riga spezza la catena flex, il flex:1 del
+   corpo non ha effetto, il corpo cresce quanto il contenuto, .modal lo taglia
+   con overflow:hidden e non si scorre più. Sul telefono, dove i campi vanno
+   in colonna singola, il fondo del modulo diventa irraggiungibile. */
+.modal>form{display:flex;flex-direction:column;flex:1;min-height:0;}
+.m-body{padding:18px 20px;overflow-y:auto;overscroll-behavior:contain;flex:1;min-height:0;-webkit-overflow-scrolling:touch;}
 .m-body.flush{padding:0;}
 .m-foot{display:flex;gap:9px;justify-content:flex-end;padding:14px 20px;border-top:1px solid var(--ink-100);
   background:var(--ink-50);flex:none;padding-bottom:calc(14px + var(--safe-b));flex-wrap:wrap;}
