@@ -1406,15 +1406,16 @@ button.stat:active{transform:scale(.985);}
 /* ============================================================
    Agenda Operativa — Confartigianato Imprese Como
    ------------------------------------------------------------
-   CONFIGURAZIONE — sostituisci i tre valori qui sotto.
-   Li trovi nel pannello Supabase: Project Settings → API.
-   La publishable key è pubblica per definizione: la sicurezza
-   è garantita dalle policy RLS descritte in supabase-schema.sql.
-   NON incollare mai qui la secret key.
+   CONFIGURAZIONE — collegata al progetto Supabase "Agenda operativa".
+   La publishable key è pubblica per definizione: chiunque apra
+   questa pagina la legge, ed è previsto che sia così. A proteggere
+   i dati sono le policy RLS create da supabase-schema.sql.
+   L'altra chiave, quella marcata come «secret», non compare qui
+   e non deve mai finire in una pagina web.
    ============================================================ */
-const SUPABASE_PROJECT_URL     = "INSERIRE_PROJECT_URL";
-const SUPABASE_PUBLISHABLE_KEY = "INSERIRE_PUBLISHABLE_KEY";
-const SUPABASE_TABLE           = "NOME_TABELLA";
+const SUPABASE_PROJECT_URL     = "https://dzcyiirkrklojzaljgwn.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_GV4hhQc5wb3nCIjBgpkNBw_ONcEGhdu";
+const SUPABASE_TABLE           = "agenda_operativa";
 
 (() => {
 "use strict";
