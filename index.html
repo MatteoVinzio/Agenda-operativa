@@ -1510,17 +1510,22 @@ function migrate(raw){
 
   const s = emptyState();
   const byName = new Map();
-  const addCat = (name, color, order) => {
+  const usati  = new Set();
+  const addCat = (name, color, order, fabbrica) => {
     const key = String(name||"Extra").trim().toLowerCase();
     if (byName.has(key)) return byName.get(key);
-    const c = { id:`cat_${slug(name)}_${Math.random().toString(36).slice(2,6)}`,
-      name:String(name||"Extra").trim(), color:color||PALETTE[order%PALETTE.length],
-      order, archived:false, updatedAt:now() };
+    // id dal nome, non casuale: due dispositivi che migrano lo stesso
+    // archivio ottengono gli stessi id e non creano doppioni
+    let id = `cat_${slug(name)}`, n = 2;
+    while (usati.has(id)) id = `cat_${slug(name)}_${n++}`;
+    usati.add(id);
+    const c = { id, name:String(name||"Extra").trim(), color:color||PALETTE[order%PALETTE.length],
+      order, archived:false, updatedAt: fabbrica ? SEED_TIME : now(), deleted:false };
     byName.set(key, c); s.categories.push(c); return c;
   };
 
   // 1. categorie di sistema del v1 + eventuali personalizzate
-  SEED_CATS.forEach(([n,c],i) => addCat(n,c,i));
+  SEED_CATS.forEach(([n,c],i) => addCat(n,c,i,true));
   (Array.isArray(raw.customCategories)?raw.customCategories:[]).forEach((c,i) => addCat(c?.name, c?.color, SEED_CATS.length+i));
 
   // 2. categorie orfane citate solo dalle attività: nessun dato va perso
@@ -1559,10 +1564,21 @@ function migrate(raw){
   return s;
 }
 
+/* Le categorie iniziali sono un valore di fabbrica, identico su ogni
+   dispositivo. Due cose lo rendono possibile:
+   - l'id è ricavato dal nome e non è più casuale: due telefoni che partono
+     da zero producono "cat_benessere" tutti e due, e la fusione le riconosce
+     come la stessa categoria invece di sommarle;
+   - la data di modifica è fissata all'origine dei tempi, così qualunque tua
+     modifica — anche vecchia di mesi — batte sempre il valore di fabbrica e
+     non viene mai sovrascritta da un dispositivo appena installato. */
+const SEED_TIME = "1970-01-01T00:00:00.000Z";
+const SEED_IDS  = new Set(SEED_CATS.map(([n]) => `cat_${slug(n)}`));
+
 function seed(){
   const s = emptyState();
   s.categories = SEED_CATS.map(([name,color],i) => ({
-    id:`cat_${slug(name)}_${Math.random().toString(36).slice(2,6)}`, name, color, order:i, archived:false, updatedAt:now()
+    id:`cat_${slug(name)}`, name, color, order:i, archived:false, updatedAt:SEED_TIME, deleted:false
   }));
   return s;
 }
@@ -1574,7 +1590,16 @@ function normalize(raw){
     color:c.color||PALETTE[i%PALETTE.length], order:Number.isFinite(c.order)?c.order:i,
     archived:Boolean(c.archived), updatedAt:c.updatedAt||now(), deleted:Boolean(c.deleted)
   }));
-  if (!s.categories.some(c=>!c.deleted)) s.categories = seed().categories;
+  // Se non resta nessuna categoria viva serve almeno un posto dove far
+  // atterrare le attività. Il seme si aggiunge, non sostituisce: buttare via
+  // l'elenco cancellerebbe le eliminazioni e le farebbe resuscitare ovunque.
+  if (!s.categories.some(c=>!c.deleted)){
+    const gia = new Set(s.categories.map(c=>c.id));
+    seed().categories.forEach(c => { if (!gia.has(c.id)) s.categories.push(c); });
+    if (!s.categories.some(c=>!c.deleted))
+      s.categories.push({ id:uid("cat"), name:"Extra", color:PALETTE[0], order:0,
+        archived:false, updatedAt:now(), deleted:false });
+  }
   const ids = new Set(s.categories.filter(c=>!c.deleted).map(c=>c.id));
   const fallback = s.categories.find(c=>!c.deleted && !c.archived)?.id || s.categories[0].id;
 
@@ -1698,6 +1723,67 @@ function sortTasks(list, mode){
   return c.sort((a,b) => (Number(a.status==="done")-Number(b.status==="done")) || (map[mode]||map.priority)(a,b));
 }
 
+/* ---------------- Riparazione dei doppioni ----------------
+   Le categorie iniziali avevano un id casuale: ogni dispositivo che partiva
+   da zero ne creava tredici sue, con gli stessi nomi ma id diversi, e la
+   fusione le sommava. Qui i gruppi vengono ricondotti a una categoria sola
+   e tutto ciò che puntava alle altre viene ricollegato: niente va perso.
+   La scelta di quale tenere è deterministica (vince l'id più basso), così
+   ogni dispositivo arriva alla stessa conclusione senza contendersela.
+   -------------------------------------------------- */
+
+/* Due categorie sono la stessa se hanno lo stesso nome, oppure se vengono
+   dallo stesso seme: "cat_benessere" e "cat_benessere_x7f2" nascono dalla
+   stessa voce di fabbrica, anche se nel frattempo le hai rinominate. */
+function catKey(c){
+  const m = /^(cat_[a-z0-9-]+?)(?:_[a-z0-9]{4})?$/.exec(String(c.id||""));
+  if (m && SEED_IDS.has(m[1])) return "seme:" + m[1];
+  return "nome:" + String(c.name||"").trim().toLowerCase();
+}
+
+function collapse(coll, keyOf, refColls, refField){
+  const gruppi = new Map();
+  state[coll].filter(x => !x.deleted).forEach(x => {
+    const k = keyOf(x);
+    if (!gruppi.has(k)) gruppi.set(k, []);
+    gruppi.get(k).push(x);
+  });
+  const remap = new Map();
+  let n = 0;
+  gruppi.forEach(list => {
+    if (list.length < 2) return;
+    // Chi resta lo decide l'id più basso: è una scelta che ogni dispositivo
+    // compie allo stesso modo, quindi nessuno contraddice l'altro.
+    list.sort((a,b) => String(a.id).localeCompare(String(b.id)));
+    const keep = list[0];
+    // Nome, colore e stato però li prende dalla copia modificata più di
+    // recente: altrimenti una rinomina fatta su un dispositivo verrebbe
+    // buttata via solo perché quella copia aveva l'id più alto.
+    const recente = list.reduce((a,b) => (b.updatedAt||"") > (a.updatedAt||"") ? b : a);
+    const ord = Math.min(...list.map(x => Number(x.order) || 0));
+    let tocco = false;
+    if (keep.name     !== recente.name)     { keep.name     = recente.name;     tocco = true; }
+    if (keep.color    !== recente.color)    { keep.color    = recente.color;    tocco = true; }
+    if (keep.archived !== recente.archived) { keep.archived = recente.archived; tocco = true; }
+    if (keep.order    !== ord)              { keep.order    = ord;              tocco = true; }
+    if (tocco) keep.updatedAt = now();
+    list.slice(1).forEach(dup => {
+      remap.set(dup.id, keep.id);
+      dup.deleted = true; dup.updatedAt = now(); n++;
+    });
+  });
+  if (remap.size) refColls.forEach(rc => state[rc].forEach(r => {
+    const to = remap.get(r[refField]);
+    if (to){ r[refField] = to; r.updatedAt = now(); }
+  }));
+  return n;
+}
+
+function dedupe(){
+  return collapse("categories", catKey, ["tasks","agenda"], "categoryId")
+       + collapse("people", p => "nome:" + String(p.name||"").trim().toLowerCase(), ["notes"], "personId");
+}
+
 /* ---------------- Rimbalzo al giorno dopo ----------------
    Ciò che era pianificato e non è stato chiuso torna su oggi,
    con il contatore dei rinvii aggiornato. Nulla si perde per strada.
@@ -1806,15 +1892,18 @@ async function pullCloudData({ firstLoad=false } = {}){
       return;
     }
     const remote = normalize(data.data || {});
-    const before = JSON.stringify({t:state.tasks,a:state.agenda,c:state.categories});
+    const foto = () => JSON.stringify([state.categories, state.tasks, state.agenda, state.people, state.notes]);
+    const before = foto();
     state = mergeStates(state, remote);
+    const uniti = dedupe();          // due elenchi uniti possono contenere la stessa voce due volte
     rollover();
-    const changed = JSON.stringify({t:state.tasks,a:state.agenda,c:state.categories}) !== before;
+    const changed = foto() !== before;
     persistLocal();
     renderAll();
     cloud.lastSync = new Date();
     setCloud("ok","Sincronizzato", syncLabel());
-    if (changed && !firstLoad) toast("Agenda aggiornata da un altro dispositivo");
+    if (uniti) toast(`${uniti} ${plural(uniti,"doppione unito","doppioni uniti")}`);
+    else if (changed && !firstLoad) toast("Agenda aggiornata da un altro dispositivo");
     if (changed) await saveCloudData(true);   // riallineo il cloud al risultato della fusione
   }catch(e){
     console.error("Lettura dal cloud non riuscita", e);
@@ -3092,7 +3181,10 @@ function importJson(file){
         `Contiene ${inc.tasks.filter(t=>!t.deleted).length} attività e ${inc.agenda.filter(a=>!a.deleted).length} appuntamenti. Verrà unito a quello che hai già: in caso di doppioni resta la versione modificata più di recente.`,
         () => {
           state = mergeStates(state, inc);
-          rollover(); save("Backup importato"); renderAll();
+          const uniti = dedupe();
+          rollover();
+          save(uniti ? `Backup importato · ${uniti} ${plural(uniti,"doppione unito","doppioni uniti")}` : "Backup importato");
+          renderAll();
         });
     }catch(e){ toast("File non valido","err"); }
   };
@@ -3417,6 +3509,7 @@ function bind(){
 
 function start(){
   state = loadState();
+  const uniti = dedupe();
   const moved = rollover();
   persistLocal();
 
@@ -3426,6 +3519,7 @@ function start(){
   renderAll();
   initCloud();
 
+  if (uniti) setTimeout(() => toast(`${uniti} ${plural(uniti,"doppione unito","doppioni uniti")}`), 500);
   if (moved){
     setTimeout(() => toast(`${moved} ${plural(moved,"attività riportata a oggi","attività riportate a oggi")}`), 700);
     if (carried().length > CARRY_REVIEW_AT) setTimeout(() => {
