@@ -71,7 +71,6 @@ h1,h2,h3,h4,p{margin:0;}
 ul{margin:0;padding:0;list-style:none;}
 :focus-visible{outline:3px solid var(--blu-500);outline-offset:2px;border-radius:4px;}
 .tnum{font-variant-numeric:tabular-nums;}
-.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;}
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important;}}
 
 /* ---------------- Shell ---------------- */
@@ -673,9 +672,14 @@ button.stat:active{transform:scale(.985);}
 .toast.ok{background:var(--verde-700);}
 .toast.err{background:var(--rosso-700);}
 
-/* Bottom nav (solo mobile) */
+/* Barra e menu rapido: esistono solo sul telefono.
+   Vanno nascosti qui, nella regola base, altrimenti sul computer restano in
+   fondo alla pagina — e siccome tutto il loro stile vive dentro il blocco
+   @media dei telefoni, comparirebbero senza formattazione, con le icone alla
+   loro dimensione naturale. Sotto gli 860px il blocco @media li riaccende. */
 .tabbar{display:none;}
-.fab{display:none;}
+.fab-menu{display:none;}
+.scrim{display:none;}
 
 /* ---------------- Responsive ---------------- */
 @media (max-width:1240px){
